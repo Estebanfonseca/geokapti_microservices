@@ -48,7 +48,7 @@ project-root/
 ├── docker-compose.yaml       # Container Orchestration
 ├── poetrylock
 ├── pyproject.toml            # Dependency configuration
-└── README.md                 # Project documentation                 # Script para ejecutar la aplicación y pruebas
+└── README.md                 # Project documentation   
 
 ```
 
