@@ -7,6 +7,9 @@ This project implements two microservices as REST API for:
 
 The distance between locations is calculated using the **Haversine formula**, which measures the distance on the spherical surface of the Earth. The architecture is built on top of Docker, using `Flask` ​​for REST APIs and `RabbitMQ` along with `Redis` for asynchronous distance processing.
 
+These services are separated into containers (redis, RabbitMQ, calculate distance and registry locations)
+connected in the same network for mutual interaction
+
 Additionally, it is worth mentioning that the technologies of RabbitMQ, poetry and redis were a bit unknown to me but here I can show my ability to learn and implement new technologies in a short time.
 
 ## Table of Contents
