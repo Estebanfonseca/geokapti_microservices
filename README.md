@@ -57,7 +57,7 @@ project-root/
 
 1. Clone the repository.
    ```bash
-   git clone <URL_DEL_REPOSITORIO>
+   git clone https://github.com/Estebanfonseca/geokapti_microservices.git
    ```
 2. Install dependencies using poetry.
    ```bash
