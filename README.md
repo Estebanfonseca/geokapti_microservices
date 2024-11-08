@@ -78,7 +78,7 @@ project-root/
 Once you access the aforementioned urls you will enter directly into said documentation.
 
 ## Registry location service
-![Resgistry location service](images/Captura%20de%20pantalla%202024-11-08%20124519.png "Resgistry location")
+![Resgistry location service](images/Captura%20de%20pantalla%202024-11-08%20130927.png "Resgistry location")
 
 ## Calculate Distance service
-![Calculate Distance service](images/Captura%20de%20pantalla%202024-11-08%20124535.png "Calculate Distance")
+![Calculate Distance service](images/Captura%20de%20pantalla%202024-11-08%20130941.png "Calculate Distance")
