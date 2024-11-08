@@ -10,7 +10,7 @@ import math
 
 # App and API settings
 app = Flask(__name__)
-app.config['API_TITLE'] = 'GeoKapt API Calculate Distance'
+app.config['API_TITLE'] = 'GeoKapti API Calculate Distance'
 app.config['API_VERSION'] = '1.0'
 app.config['OPENAPI_VERSION'] = '3.0.2'
 app.config['OPENAPI_URL_PREFIX'] = '/'
