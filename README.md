@@ -77,7 +77,7 @@ project-root/
 5. The two services have integrated interactive documentation with Swagger in the root route '/'
 Once you access the aforementioned urls you will enter directly into said documentation.
 
-## Resgistry location service
+## Registry location service
 ![Resgistry location service](images/Captura%20de%20pantalla%202024-11-08%20124519.png "Resgistry location")
 
 ## Calculate Distance service
