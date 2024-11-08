@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+
+  rabbitmq:
+    image: "rabbitmq:3-management"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - backend
+
+  location_service:
+    build:
+      context: .
+      dockerfile: location_service/Dockerfile  
+    environment:
+      - PYTHONPATH=/location_service  
+    command: ["/start.sh"] 
+    ports:
+      - "5001:5001"
+    depends_on:
+      - rabbitmq
+      - redis
+    networks:
+      - backend
+
+  distance_service:
+    build:
+      context: .
+      dockerfile: distance_service/Dockerfile 
+    environment:
+      - PYTHONPATH=/distance_service 
+    command: ["/start.sh"]
+    ports:
+      - "5000:5000"
+    depends_on:
+      - rabbitmq
+      - redis
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
