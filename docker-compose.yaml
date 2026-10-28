@@ -1,48 +1,89 @@
-version: '3.8'
-
 services:
   redis:
-    image: redis:latest
+    image: redis:8.10.3
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks:
       - backend
 
   rabbitmq:
-    image: "rabbitmq:3-management"
+    image: rabbitmq:3.13.7-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Copy .env.example to .env first}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Copy .env.example to .env first}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     networks:
       - backend
 
   location_service:
     build:
       context: .
-      dockerfile: location_service/Dockerfile  
+      dockerfile: location_service/Dockerfile
     environment:
-      - PYTHONPATH=/location_service  
-    command: ["/start.sh"] 
+      PYTHONPATH: /location_service
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
     ports:
-      - "5001:5001"
+      - "127.0.0.1:${LOCATION_SERVICE_PORT:-5001}:5001"
     depends_on:
-      - rabbitmq
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/openapi.json', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     networks:
       - backend
 
   distance_service:
     build:
       context: .
-      dockerfile: distance_service/Dockerfile 
+      dockerfile: distance_service/Dockerfile
     environment:
-      - PYTHONPATH=/distance_service 
-    command: ["/start.sh"]
+      PYTHONPATH: /distance_service
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:?Copy .env.example to .env first}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Copy .env.example to .env first}
     ports:
-      - "5000:5000"
+      - "127.0.0.1:${DISTANCE_SERVICE_PORT:-5000}:5000"
     depends_on:
-      - rabbitmq
-      - redis
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/openapi.json', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     networks:
       - backend
 

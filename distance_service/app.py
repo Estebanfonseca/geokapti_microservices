@@ -1,170 +1,185 @@
-import structlog
-from flask import Flask, jsonify, request, abort
+import json
+import math
+import os
+
 import pika
 import redis
-import json
-from flask_smorest import Api, Blueprint
-from marshmallow import Schema, fields
+import structlog
+from flask import Flask
 from flask.views import MethodView
-import math
+from flask_smorest import Api, Blueprint, abort
+from marshmallow import Schema, fields
 
 # App and API settings
 app = Flask(__name__)
-app.config['API_TITLE'] = 'GeoKapti API Calculate Distance'
-app.config['API_VERSION'] = '1.0'
-app.config['OPENAPI_VERSION'] = '3.0.2'
-app.config['OPENAPI_URL_PREFIX'] = '/'
-app.config['OPENAPI_SWAGGER_UI_PATH'] = ''
-app.config['OPENAPI_SWAGGER_UI_URL'] = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist/'
+app.config["API_TITLE"] = "GeoKapti API Calculate Distance"
+app.config["API_VERSION"] = "1.0"
+app.config["OPENAPI_VERSION"] = "3.0.2"
+app.config["OPENAPI_URL_PREFIX"] = "/"
+app.config["OPENAPI_SWAGGER_UI_PATH"] = ""
+app.config["OPENAPI_SWAGGER_UI_URL"] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
 
-# Configuring structlog for logging
 logger = structlog.get_logger()
 
-# Connecting to Redis
-r = redis.Redis(host='redis', port=6379, db=0)
+r = redis.Redis(
+    host=os.getenv("REDIS_HOST", "redis"),
+    port=int(os.getenv("REDIS_PORT", "6379")),
+    db=int(os.getenv("REDIS_DB", "0")),
+)
 
-# API initialization with Flask-Smorest
 api = Api(app)
+blp = Blueprint(
+    "distance",
+    "distance",
+    url_prefix="",
+    description="Calculates distances between locations",
+)
 
-# Create a Blueprint for endpoints related to distance calculation
-blp = Blueprint('distance', 'distance', url_prefix='', description="Calculates distances between locations")
 
-# Schema for input validation
 class LocationIdsSchema(Schema):
-    location_ids = fields.List(fields.String, required=True, metadata={"description": "List of location IDs to calculate distance"})
+    location_ids = fields.List(
+        fields.String(),
+        required=True,
+        metadata={"description": "Exactly two registered location IDs"},
+    )
 
-# Schema for calculation answer
+
 class DistanceRequestStatusSchema(Schema):
-    status = fields.String(metadata={"description": "Status of the distance calculation request"})
+    status = fields.String(
+        metadata={"description": "Status of the distance calculation request"}
+    )
 
-# Schema for the response of the distance result
+
 class DistanceResultSchema(Schema):
-    total_distance = fields.Float(metadata={"description": "Total calculated distance between locations"})
+    total_distance = fields.Float(
+        metadata={"description": "Great-circle distance in kilometers"}
+    )
 
-class NotFoundSchema(Schema):
-    status = fields.String(metadata={"description": "Status message indicating no results are available"})
 
-# Function to retrieve data from Redis using IDs
 def get_location_from_redis(location_id):
     location_data = r.get(location_id)
     if location_data:
         return json.loads(location_data)
     return None
 
-# Haversine formula to calculate the distance between two points
+
 def haversine(lat1, lon1, lat2, lon2):
-    R = 6371  # Earth's radius in kilometers
+    """Calculate the great-circle distance between two coordinates in kilometers."""
+    earth_radius_km = 6371
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
-    
-    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    distance = R * c  # Result in kilometers
-    return distance
+    return earth_radius_km * c
 
-# Function to send the message to RabbitMQ queue
+
+def rabbitmq_connection_parameters():
+    credentials = pika.PlainCredentials(
+        os.environ["RABBITMQ_USER"],
+        os.environ["RABBITMQ_PASSWORD"],
+    )
+    return pika.ConnectionParameters(
+        host=os.getenv("RABBITMQ_HOST", "rabbitmq"),
+        port=int(os.getenv("RABBITMQ_PORT", "5672")),
+        credentials=credentials,
+    )
+
+
 def send_to_queue(message):
+    connection = None
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters('rabbitmq'))
+        connection = pika.BlockingConnection(rabbitmq_connection_parameters())
         channel = connection.channel()
-        channel.queue_declare(queue='result_queue')
-        channel.basic_publish(exchange='', routing_key='result_queue', body=message)
-        connection.close()
-        logger.info("Message sent to RabbitMQ", message=message)
-    except pika.exceptions.AMQPConnectionError as e:
-        logger.error("Failed to connect to RabbitMQ", error=str(e))
-        abort(500, message="Failed to send message to RabbitMQ")
+        channel.queue_declare(queue="result_queue")
+        channel.basic_publish(exchange="", routing_key="result_queue", body=message)
+        logger.info("Distance result published", queue="result_queue")
+    except pika.exceptions.AMQPError as error:
+        logger.error(
+            "Failed to publish distance result",
+            error_type=type(error).__name__,
+        )
+        abort(500, message="Failed to publish distance result")
+    finally:
+        if connection is not None and connection.is_open:
+            connection.close()
 
-# Callback to process RabbitMQ messages
-def callback(ch, method, properties, body):
-    total_distance = float(body.decode('utf-8'))
-    logger.info("Distance result retrieved", total_distance=total_distance)
-    ch.basic_ack(delivery_tag=method.delivery_tag)
 
-# Function to get results from RabbitMQ queue
-def get_result_from_queue():
-    connection = pika.BlockingConnection(pika.ConnectionParameters('rabbitmq'))
-    channel = connection.channel()
-
-    # Declare the queue result_queue
-    channel.queue_declare(queue='result_queue')
-    logger.info("Queue 'result_queue' declared successfully")
-
-    # Consume the message
-    channel.basic_consume(queue='result_queue', on_message_callback=callback)
-
-    # This method will block execution until the message is consumed
-    channel.start_consuming()
-
-# Endpoint to calculate distance
-@blp.route('/calculate_distance', methods=['POST'])
+@blp.route("/calculate_distance")
 class CalculateDistanceResource(MethodView):
     @blp.arguments(LocationIdsSchema)
     @blp.response(202, DistanceRequestStatusSchema)
+    @blp.alt_response(400, description="Exactly two location IDs are required")
+    @blp.alt_response(404, description="A requested location was not found")
+    @blp.alt_response(500, description="The result could not be published")
     def post(self, args):
-        """Request distance calculation"""
-        location_ids = args['location_ids']
-        
-        # Retrieve Redis locations using IDs
+        """Calculate and enqueue the distance between two registered locations."""
+        location_ids = args["location_ids"]
+        if len(location_ids) != 2:
+            abort(
+                400,
+                message="Exactly two location IDs are required to calculate distance.",
+            )
+
         locations = []
         for location_id in location_ids:
             location_data = get_location_from_redis(location_id)
-            if location_data:
-                locations.append(location_data)
-            else:
-                logger.error(f"Location not found in Redis for ID: {location_id}")
+            if location_data is None:
+                logger.info("Location not found", location_id=location_id)
                 abort(404, message=f"Location not found for ID: {location_id}")
-        
-        # Verify that the necessary locations were obtained
-        if len(locations) != 2:
-            abort(400, message="Exactly two location IDs are required to calculate distance.")
-        
-        # Calculate the distance between the two locations using the Haversine formula
-        lat1, lon1 = locations[0]['latitude'], locations[0]['longitude']
-        lat2, lon2 = locations[1]['latitude'], locations[1]['longitude']
-        distance = haversine(lat1, lon1, lat2, lon2)
+            locations.append(location_data)
 
-        # Send the result to the result_queue queue
+        distance = haversine(
+            locations[0]["latitude"],
+            locations[0]["longitude"],
+            locations[1]["latitude"],
+            locations[1]["longitude"],
+        )
+
         send_to_queue(str(distance))
-        logger.info(f"Distance calculated: {distance} km", location_ids=location_ids)
+        logger.info("Distance calculated", location_count=len(location_ids))
+        return {"status": "Request sent to calculate distance"}
 
-        return {"status": "Request sent to calculate distance"}, 202
 
-# Endpoint to get the calculated distance result
-@blp.route('/distance_result', methods=['GET'])
+@blp.route("/distance_result")
 class DistanceResultResource(MethodView):
     @blp.response(200, DistanceResultSchema)
-    @blp.response(204, NotFoundSchema)
+    @blp.alt_response(204, description="No distance result is available")
+    @blp.alt_response(500, description="The result queue is unavailable")
     def get(self):
-        """Retrieve the distance result"""
+        """Retrieve and acknowledge the next distance result."""
+        connection = None
         try:
-            # RabbitMQ connection and channel
-            connection = pika.BlockingConnection(pika.ConnectionParameters('rabbitmq'))
+            connection = pika.BlockingConnection(rabbitmq_connection_parameters())
             channel = connection.channel()
+            channel.queue_declare(queue="result_queue")
+            method_frame, _, body = channel.basic_get(
+                queue="result_queue",
+                auto_ack=False,
+            )
 
-            # Declare result_queue before getting messages
-            channel.queue_declare(queue='result_queue')
-            logger.info("Queue 'result_queue' declared successfully")
-
-            # Get message from queue result_queue
-            method_frame, header_frame, body = channel.basic_get(queue='result_queue')
-            
             if body is None:
-                logger.info("No messages found in 'result_queue'")
+                logger.info("No distance result available", queue="result_queue")
+                return "", 204
+
+            total_distance = float(body.decode("utf-8"))
+            channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+            logger.info("Distance result retrieved")
+            return {"total_distance": total_distance}
+        except pika.exceptions.AMQPError as error:
+            logger.error(
+                "Failed to retrieve distance result",
+                error_type=type(error).__name__,
+            )
+            abort(500, message="Could not retrieve the distance result")
+        finally:
+            if connection is not None and connection.is_open:
                 connection.close()
-                return jsonify({"status": "No results available"}), 204
 
-            # Get and return the distance result
-            total_distance = float(body.decode('utf-8'))
-            logger.info("Distance result retrieved", total_distance=total_distance)
-            connection.close()
-            return jsonify({"total_distance": total_distance}), 200
 
-        except pika.exceptions.AMQPConnectionError as e:
-            logger.error("Failed to connect to RabbitMQ", error=str(e))
-            abort(500, message="Could not connect to RabbitMQ")
-
-# Register the Blueprint in the API
 api.register_blueprint(blp)

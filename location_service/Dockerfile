@@ -1,25 +1,18 @@
-FROM python:3.12-slim
+FROM python:3.12.16-slim
 
 WORKDIR /location_service
 
-COPY pyproject.toml poetry.lock ./
+ENV PYTHONPATH=/location_service \
+    PYTHONUNBUFFERED=1
 
-# Copy the start.sh file to the container
+COPY pyproject.toml poetry.lock ./
+RUN pip install --no-cache-dir poetry==1.8.4 \
+    && poetry install --no-root --with dev
+
 COPY ./location_service/start.sh /start.sh
 RUN chmod +x /start.sh
-
-# Set the variables so that the container finds the code
-ENV PYTHONPATH=/location_service
-ENV FLASK_ENV=production
-
-RUN pip install poetry
-
-RUN poetry install --no-root --with dev
-
-
 COPY ./location_service/ /location_service/
 
-EXPOSE 5000
+EXPOSE 5001
 
-# Run the Flask server
 CMD ["/start.sh"]
